@@ -736,15 +736,13 @@ abstract contract ReentrancyGuard {
 
 // RewardToken with Governance.
 interface RewardToken {
-    function totalFees() external returns (uint256);
-    
     function totalSupply() external view returns (uint256);
     
     function transfer(address to, uint value) external returns (bool);
     
     function balanceOf(address account) external view returns (uint256);
     
-    function mint(address user, uint256 amount) external;
+    function mint(uint256 amount) external;
 }
 
 // Staking is the master of Token. He can make Token and he is a fair guy.
@@ -760,12 +758,12 @@ contract Staking is Ownable, ReentrancyGuard {
 
     // Info of each user.
     struct UserInfo {
-        uint256 amount;         // How many LP tokens the user has provided.
+        uint256 amount;         // How many tokens the user has provided.
         uint256 rewardDebt;     // Reward debt. See explanation below.
     }
 
     // Info of each pool.
-    IERC20 stakingToken;           // Address of LP token contract.
+    IERC20 stakingToken;           // Address of token contract.
     uint256 lastRewardBlock;  // Last block number that Token distribution occurs.
     uint256 accTokenPerShare = 0;   // Accumulated Token per share, times 1e12. See below.
     uint256 tokenSupply; 
@@ -788,7 +786,7 @@ contract Staking is Ownable, ReentrancyGuard {
         uint256 _startBlock
     ) public {
         rewardToken = _token;
-        stakingToken = IERC20(_token);
+        stakingToken = IERC20(address(_token));
         startBlock = _startBlock;
     }
 
@@ -797,16 +795,16 @@ contract Staking is Ownable, ReentrancyGuard {
         if (block.number <= lastRewardBlock) {
             return;
         }
-        uint256 tokenSupply = stakingToken.balanceOf(address(this));
+        tokenSupply = stakingToken.balanceOf(address(this));
         if (tokenSupply == 0) {
-            pool.lastRewardBlock = block.number;
+            lastRewardBlock = block.number;
             return;
         }
-        uint256 tokenReward = tokenPerBlock.mul(allocPoint);
-
-        rewardToken.mint(address(this), tokenReward);
         
-        accTokenPerShare = accTokenPerShare.add(tokenReward.mul(1e12).div(tokenSupply));
+        uint256 rewardAmount = tokenPerBlock.mul(block.number.sub(lastRewardBlock));
+        rewardToken.mint(rewardAmount);
+        
+        accTokenPerShare = accTokenPerShare.add(rewardAmount.mul(1e12).div(tokenSupply));
         lastRewardBlock = block.number;
     }
 
@@ -842,17 +840,16 @@ contract Staking is Ownable, ReentrancyGuard {
 
     // Withdraw LP tokens from Staking.
     function withdraw(uint256 _amount) public nonReentrant {
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][msg.sender];
+        UserInfo storage user = userInfo[msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
-        updatePool(_pid);
-        payPendingToken(_pid);
+        updatePool();
+        payPendingToken();
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
+            stakingToken.safeTransfer(address(msg.sender), _amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e12);
-        emit Withdraw(msg.sender, _pid, _amount);
+        user.rewardDebt = user.amount.mul(accTokenPerShare).div(1e12);
+        emit Withdraw(msg.sender, _amount);
     }
 
     // Safe rewardToken transfer function, just in case if rounding error causes pool to not have enough Tokens.
